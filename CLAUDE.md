@@ -24,6 +24,11 @@ The file must stay small enough to fit comfortably in a single context window. T
 ## Code style
 - Comments are all lowercase, no uppercase characters at all — e.g. `// start the audio context after user gesture`
 - Use a small assert helper for invariants: `function assert(cond, msg) { if (!cond) console.error('assert:', msg); }` — use it liberally to catch bad state early
+- Always use full descriptive names — no abbreviations. `formatTimer` not `fmt`, `totalSeconds` not `s`
+- Always use blocks `{ }` for if/for/while/etc — never blockless one-liners
+
+## Commit style
+Single sentence, active verb, present tense. E.g. "add audio cues for phase transitions" or "fix timer reset not stopping interval". No period at the end.
 
 ## Collaboration
 Ask lots of questions. This project is collaborative. When something is ambiguous or has trade-offs, ask rather than guess.

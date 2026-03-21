@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Fit">
+  <title>Fit</title>
+  <style>
+    :root { color-scheme: dark; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #000;
+      color: #fff;
+      font-family: system-ui, sans-serif;
+      height: 100dvh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+    }
+
+    #round {
+      font-size: 1rem;
+      opacity: 0.4;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    #phase {
+      font-size: 1.5rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      transition: color 0.4s;
+    }
+
+    body[data-phase="work"] #phase  { color: #ff6040; }
+    body[data-phase="rest"] #phase  { color: #4098e0; }
+
+    #timer {
+      font-size: min(22vw, 28vh);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+
+    #buttons {
+      margin-top: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    button {
+      background: none;
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #startPauseBtn {
+      font-size: 1.1rem;
+      padding: 0.9rem 3rem;
+      border: 2px solid #fff;
+      border-radius: 2rem;
+    }
+
+    #startPauseBtn:active {
+      background: #fff;
+      color: #000;
+    }
+
+    #resetBtn {
+      font-size: 0.9rem;
+      padding: 0.5rem;
+      opacity: 0.3;
+    }
+
+    #resetBtn:active { opacity: 0.7; }
+  </style>
+</head>
+<body data-phase="work">
+  <div id="round">Round 1</div>
+  <div id="phase">Work</div>
+  <div id="timer">0:00</div>
+  <div id="buttons">
+    <button id="startPauseBtn">Start</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+
+  <script>
+    // assert helper — use liberally to catch bad state early
+    function assert(cond, msg) { if (!cond) console.error('assert:', msg); }
+
+    const DEV = false; // shorter timers and no service worker when true
+
+    if ('serviceWorker' in navigator && !DEV && location.hostname !== 'localhost') {
+      navigator.serviceWorker.register('./sw.js');
+    }
+
+    const PHASES = DEV ? { work: 5, rest: 3 } : { work: 30, rest: 15 };
+
+    let running  = false;
+    let phase    = 'work';
+    let elapsed  = 0;
+    let round    = 1;
+    let interval = null;
+    let audioCtx = null; // created on first tap (ios requirement)
+
+    const SOUNDS = {
+      countdownTickWork: [
+        { frequency: 880, duration: 0.08, delay: 0 },
+      ],
+      countdownTickRest: [
+        { frequency: 440, duration: 0.08, delay: 0 },
+      ],
+      transitionToRest: [
+        { frequency: 660, duration: 0.2,  delay: 0   },
+        { frequency: 440, duration: 0.4,  delay: 0.2 },
+      ],
+      transitionToWork: [
+        { frequency: 880, duration: 0.1, delay: 0    },
+        { frequency: 880, duration: 0.1, delay: 0.13 },
+        { frequency: 880, duration: 0.1, delay: 0.26 },
+      ],
+    };
+
+    function playTone({ frequency, duration, delay }) {
+      assert(audioCtx, 'playTone called before audioCtx exists');
+      const oscillator = audioCtx.createOscillator();
+      const gain       = audioCtx.createGain();
+      oscillator.connect(gain);
+      gain.connect(audioCtx.destination);
+      oscillator.type            = 'sine';
+      oscillator.frequency.value = frequency;
+      const startTime = audioCtx.currentTime + (delay || 0);
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.4, startTime + 0.01);
+      gain.gain.linearRampToValueAtTime(0, startTime + duration);
+      oscillator.start(startTime);
+      oscillator.stop(startTime + duration + 0.01);
+    }
+
+    function playSound(tones) {
+      for (const tone of tones) {
+        playTone(tone);
+      }
+    }
+
+    function formatTimer(totalSeconds) {
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${minutes}:${String(seconds).padStart(2, '0')}`;
+    }
+
+    function render() {
+      document.body.dataset.phase                    = phase;
+      document.getElementById('round').textContent  = `Round ${round}`;
+      document.getElementById('phase').textContent  = phase === 'work' ? 'Work' : 'Rest';
+      document.getElementById('timer').textContent  = formatTimer(elapsed);
+      document.getElementById('startPauseBtn').textContent    = running ? 'Pause' : 'Start';
+    }
+
+    function tick() {
+      elapsed++;
+      if (elapsed >= PHASES[phase]) {
+        if (phase === 'work') {
+          phase = 'rest';
+          playSound(SOUNDS.transitionToRest);
+        } else {
+          phase = 'work';
+          round++;
+          playSound(SOUNDS.transitionToWork);
+        }
+        elapsed = 0;
+      } else if (elapsed >= PHASES[phase] - 3) {
+        playSound(phase === 'work' ? SOUNDS.countdownTickWork : SOUNDS.countdownTickRest);
+      }
+      render();
+    }
+
+    function toggle() {
+      // create and resume audio context on first user gesture (ios requirement)
+      if (!audioCtx) { audioCtx = new AudioContext(); }
+      if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+
+      running = !running;
+      if (running) {
+        playSound(phase === 'work' ? SOUNDS.transitionToWork : SOUNDS.transitionToRest);
+        interval = setInterval(tick, 1000);
+      } else {
+        clearInterval(interval);
+        interval = null;
+      }
+      render();
+    }
+
+    function reset() {
+      clearInterval(interval);
+      interval = null;
+      running  = false;
+      phase    = 'work';
+      elapsed  = 0;
+      round    = 1;
+      render();
+    }
+
+    document.getElementById('startPauseBtn').addEventListener('click', toggle);
+    document.getElementById('resetBtn').addEventListener('click', reset);
+    render();
+  </script>
+</body>
+</html>
