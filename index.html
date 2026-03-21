@@ -122,9 +122,9 @@
     // assert helper — use liberally to catch bad state early
     function assert(cond, msg) { if (!cond) console.error('assert:', msg); }
 
-    const DEV = true; // shorter timers and no service worker when true
+    const DEV = location.hostname === 'localhost'; // shorter timers and no service worker on localhost
 
-    if ('serviceWorker' in navigator && !DEV && location.hostname !== 'localhost') {
+    if ('serviceWorker' in navigator && !DEV) {
       navigator.serviceWorker.register('./sw.js');
     }
 
