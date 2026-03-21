@@ -13,12 +13,10 @@ Ideas to try. No commitment to any of these.
 - **Sound profiles** — alternative sound sets (e.g. lower-key/less aggressive for late-night use)
 
 ## Screen & display
-- **Wake lock** — use the Wake Lock API to keep the screen on during a workout so it doesn't dim mid-set
+- **Rest counts down** — during rest, show remaining time counting down; work phase keeps counting up
 - **Phase progress bar** — thin bar at the top or bottom showing how far through the current phase you are, as an alternative to (or complement of) the counter
-- **Bigger rest timer** — during rest, show the full remaining rest time counting down instead of up, since that's what you care about most when you're recovering
 
 ## Workout structure
-- **Exercise list** — attach exercise names to work phases (e.g. "Lateral raises", "Squats") so the app tells you what to do next
 - **Warm-up / cool-down phases** — optional phases at start/end with their own durations and sounds
 - **Rest between rounds** — a longer rest every N rounds (e.g. 60s every 4 rounds)
 
