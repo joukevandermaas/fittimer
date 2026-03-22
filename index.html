@@ -42,8 +42,9 @@
       transition: color 0.4s;
     }
 
-    body[data-phase="work"] #phase  { color: #ff6040; }
-    body[data-phase="rest"] #phase  { color: #4098e0; }
+    body[data-phase="work"] #phase { color: #ff6040; }
+    body[data-phase="rest"] #phase { color: #4098e0; }
+    body[data-phase="done"] #phase { color: #40c060; }
 
     #timerBlock {
       display: flex;
@@ -95,6 +96,114 @@
     }
 
     #resetBtn:active { opacity: 0.7; }
+
+    #settingsBtn, #closeSettingsBtn {
+      position: absolute;
+      top: 1.25rem;
+      right: 1.25rem;
+      width: 44px;
+      height: 44px;
+      font-size: 1.25rem;
+      letter-spacing: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.3;
+    }
+
+    #settingsBtn:active, #closeSettingsBtn:active { opacity: 0.7; }
+
+    /* settings dialog */
+
+    dialog[open] {
+      background: #000;
+      border: none;
+      color: #fff;
+      padding: 2rem 1.75rem;
+      width: 100%;
+      height: 100dvh;
+      max-width: 100%;
+      max-height: 100%;
+      position: fixed;
+      top: 0;
+      left: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.5rem;
+    }
+
+    dialog::backdrop { display: none; }
+
+
+    #settingsForm { display: contents; }
+
+    #presets, #fields, #doneBtn {
+      width: min(100%, 300px);
+    }
+
+    #presets {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .presetBtn {
+      flex: 1;
+      font-size: 0.85rem;
+      padding: 0.55rem 0.25rem;
+      border: 1px solid #444;
+      border-radius: 0.75rem;
+      letter-spacing: 0;
+      opacity: 1;
+    }
+
+    .presetBtn:active { background: #333; }
+
+    #fields {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      align-items: center;
+      gap: 0.85rem 0.75rem;
+    }
+
+    #fields label {
+      opacity: 0.6;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-size: 0.85rem;
+    }
+
+    #fields input {
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 0.5rem;
+      color: #fff;
+      font-size: 1.1rem;
+      font-variant-numeric: tabular-nums;
+      padding: 0.4rem 0.6rem;
+      text-align: right;
+      width: 5rem;
+    }
+
+    #fields .hint {
+      font-size: 0.75rem;
+      opacity: 0.35;
+    }
+
+    #doneBtn {
+      font-size: 1rem;
+      padding: 0.75rem 2rem;
+      border: 2px solid #fff;
+      border-radius: 2rem;
+      align-self: center;
+    }
+
+    #doneBtn:active {
+      background: #fff;
+      color: #000;
+    }
   </style>
 </head>
 <body data-phase="work">
@@ -106,31 +215,77 @@
   <div id="timerBlock">
     <div id="timer">0:00</div>
   </div>
+  <button id="settingsBtn">⚙</button>
   <div id="buttons">
     <button id="startPauseBtn">Start</button>
     <button id="resetBtn">Reset</button>
   </div>
 
+  <dialog id="settingsDialog">
+    <button id="closeSettingsBtn">✕</button>
+    <div id="presets">
+      <button class="presetBtn" data-preset="0">20/10 ×8</button>
+      <button class="presetBtn" data-preset="1">30/15 ×10</button>
+      <button class="presetBtn" data-preset="2">45/15 ×8</button>
+    </div>
+    <form id="settingsForm">
+      <div id="fields">
+        <label for="workInput">Work</label>
+        <input type="number" id="workInput" min="5" max="300">
+        <span class="hint">sec</span>
+        <label for="restInput">Rest</label>
+        <input type="number" id="restInput" min="5" max="300">
+        <span class="hint">sec</span>
+        <label for="roundsInput">Rounds</label>
+        <input type="number" id="roundsInput" min="0" max="99">
+        <span class="hint">0 = ∞</span>
+      </div>
+      <button id="doneBtn">Done</button>
+    </form>
+  </dialog>
+
   <script>
     // assert helper — use liberally to catch bad state early
     function assert(cond, msg) { if (!cond) console.error('assert:', msg); }
 
-    const DEV = location.search.includes('dev'); // shorter timers and no service worker on localhost
+    const DEV = location.search.includes('dev');
 
     if ('serviceWorker' in navigator && !DEV) {
       navigator.serviceWorker.register('./sw.js');
     }
 
-    const PHASES = DEV ? { work: 8, rest: 5 } : { work: 30, rest: 15 };
+    const PRESETS = [
+      { workSeconds: 20, restSeconds: 10, targetRounds: 8  },
+      { workSeconds: 30, restSeconds: 15, targetRounds: 10 },
+      { workSeconds: 45, restSeconds: 15, targetRounds: 8  },
+    ];
+    const DEFAULT_SETTINGS = { ...PRESETS[1] };
+    let settings = { ...DEFAULT_SETTINGS };
+
+    function loadSettings() {
+      const saved = localStorage.getItem('fitSettings');
+      if (saved) {
+        try { Object.assign(settings, JSON.parse(saved)); } catch (e) {}
+      }
+    }
+
+    function saveSettings() {
+      localStorage.setItem('fitSettings', JSON.stringify(settings));
+    }
+
+    // in dev mode, use short fixed durations regardless of settings
+    function phaseDurations() {
+      return DEV ? { work: 8, rest: 5 } : { work: settings.workSeconds, rest: settings.restSeconds };
+    }
 
     let running      = false;
-    let phase        = 'work';
+    let phase        = 'work'; // 'work' | 'rest' | 'done'
     let elapsed      = 0;
     let round        = 1;
     let totalSeconds = 0;
     let interval     = null;
-    let audioCtx = null; // created on first tap (ios requirement)
-    let wakeLock = null; // screen wake lock, acquired while running
+    let audioCtx     = null; // created on first tap (ios requirement)
+    let wakeLock     = null; // screen wake lock, acquired while running
 
     const SOUNDS = {
       countdownTickWork: [
@@ -150,6 +305,11 @@
       ],
       workPulse: [
         { frequency: 220, duration: 0.12, delay: 0 },
+      ],
+      workoutComplete: [
+        { frequency: 440, duration: 0.15, delay: 0   },
+        { frequency: 554, duration: 0.15, delay: 0.2 },
+        { frequency: 660, duration: 0.4,  delay: 0.4 },
       ],
     };
 
@@ -182,19 +342,35 @@
     }
 
     function render() {
-      document.body.dataset.phase                             = phase;
-      document.getElementById('round').textContent           = `Round ${round}`;
-      document.getElementById('totalTime').textContent       = formatTimer(totalSeconds);
-      document.getElementById('phase').textContent           = phase === 'work' ? 'Work' : 'Rest';
-      document.getElementById('timer').textContent           = formatTimer(PHASES[phase] - elapsed);
-      document.getElementById('startPauseBtn').textContent   = running ? 'Pause' : 'Start';
+      const phases = phaseDurations();
+      document.body.dataset.phase = phase;
+      const roundSuffix = settings.targetRounds > 0 ? ` / ${settings.targetRounds}` : '';
+      document.getElementById('round').textContent         = `Round ${round}${roundSuffix}`;
+      document.getElementById('totalTime').textContent     = formatTimer(totalSeconds);
+      document.getElementById('phase').textContent         = phase === 'work' ? 'Work' : phase === 'rest' ? 'Rest' : 'Done';
+      document.getElementById('timer').textContent         = phase === 'done' ? '0:00' : formatTimer(phases[phase] - elapsed);
+      document.getElementById('startPauseBtn').textContent = running ? 'Pause' : 'Start';
+      document.getElementById('settingsBtn').style.display = running ? 'none' : '';
     }
 
     function tick() {
+      const phases = phaseDurations();
       elapsed++;
       totalSeconds++;
-      if (elapsed >= PHASES[phase]) {
+      if (elapsed >= phases[phase]) {
         if (phase === 'work') {
+          if (settings.targetRounds > 0 && round >= settings.targetRounds) {
+            // last round complete — stop and show done state
+            clearInterval(interval);
+            interval = null;
+            running  = false;
+            phase    = 'done';
+            elapsed  = 0;
+            if (wakeLock) { wakeLock.release(); wakeLock = null; }
+            playSound(SOUNDS.workoutComplete);
+            render();
+            return;
+          }
           phase = 'rest';
           playSound(SOUNDS.transitionToRest);
         } else {
@@ -203,7 +379,7 @@
           playSound(SOUNDS.transitionToWork);
         }
         elapsed = 0;
-      } else if (elapsed >= PHASES[phase] - 3) {
+      } else if (elapsed >= phases[phase] - 3) {
         playSound(phase === 'work' ? SOUNDS.countdownTickWork : SOUNDS.countdownTickRest);
       } else if (phase === 'work' && elapsed % 5 === 0) {
         playSound(SOUNDS.workPulse);
@@ -215,6 +391,9 @@
       // create and resume audio context on first user gesture (ios requirement)
       if (!audioCtx) { audioCtx = new AudioContext(); }
       if (audioCtx.state === 'suspended') { audioCtx.resume(); }
+
+      // if the previous workout completed, reset before starting a new one
+      if (phase === 'done') { reset(); }
 
       running = !running;
       if (running) {
@@ -234,7 +413,7 @@
 
     function reset() {
       clearInterval(interval);
-      interval = null;
+      interval     = null;
       running      = false;
       phase        = 'work';
       elapsed      = 0;
@@ -243,6 +422,51 @@
       render();
     }
 
+    function openSettings() {
+      document.getElementById('workInput').value   = settings.workSeconds;
+      document.getElementById('restInput').value   = settings.restSeconds;
+      document.getElementById('roundsInput').value = settings.targetRounds;
+      document.getElementById('settingsDialog').showModal();
+    }
+
+    function applySettings() {
+      const workValue   = parseInt(document.getElementById('workInput').value, 10);
+      const restValue   = parseInt(document.getElementById('restInput').value, 10);
+      const roundsValue = parseInt(document.getElementById('roundsInput').value, 10);
+      settings.workSeconds  = Math.max(5, isNaN(workValue)   ? DEFAULT_SETTINGS.workSeconds  : workValue);
+      settings.restSeconds  = Math.max(5, isNaN(restValue)   ? DEFAULT_SETTINGS.restSeconds  : restValue);
+      settings.targetRounds = Math.max(0, isNaN(roundsValue) ? DEFAULT_SETTINGS.targetRounds : roundsValue);
+      saveSettings();
+      reset();
+    }
+
+    document.querySelectorAll('.presetBtn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const preset = PRESETS[btn.dataset.preset];
+        document.getElementById('workInput').value   = preset.workSeconds;
+        document.getElementById('restInput').value   = preset.restSeconds;
+        document.getElementById('roundsInput').value = preset.targetRounds;
+      });
+    });
+
+    document.querySelectorAll('#fields input').forEach(input => {
+      input.addEventListener('focus', () => input.select());
+    });
+
+    document.getElementById('settingsForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      applySettings();
+      document.getElementById('settingsDialog').close();
+    });
+
+    document.getElementById('closeSettingsBtn').addEventListener('click', () => {
+      document.getElementById('settingsDialog').close();
+    });
+
+    document.getElementById('settingsBtn').addEventListener('click', openSettings);
+    document.getElementById('startPauseBtn').addEventListener('click', toggle);
+    document.getElementById('resetBtn').addEventListener('click', reset);
+
     // re-acquire wake lock if page becomes visible again while running
     document.addEventListener('visibilitychange', () => {
       if (running && document.visibilityState === 'visible' && 'wakeLock' in navigator) {
@@ -250,8 +474,7 @@
       }
     });
 
-    document.getElementById('startPauseBtn').addEventListener('click', toggle);
-    document.getElementById('resetBtn').addEventListener('click', reset);
+    loadSettings();
     render();
   </script>
 </body>

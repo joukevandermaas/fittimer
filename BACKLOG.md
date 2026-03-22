@@ -3,9 +3,9 @@
 Ideas to try. No commitment to any of these.
 
 ## Configuration
-- **Configurable intervals** — let the user set work/rest durations directly in the UI, saved to localStorage
-- **Round target** — set how many rounds you want to do; show progress (e.g. "Round 3 / 8") and stop automatically
-- **Workout presets** — named presets like Tabata (20s/10s), long HIIT (45s/15s), endurance (60s/20s)
+- ~~**Configurable intervals**~~ — done
+- ~~**Round target**~~ — done
+- ~~**Workout presets**~~ — done (20/10 ×8, 30/15 ×10, 45/15 ×8)
 
 ## Audio
 - **Periodic work-phase beep** — soft beep every N seconds during work to confirm time is progressing (long intervals feel endless without it); currently every 5s, may need tuning
