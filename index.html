@@ -207,11 +207,6 @@
 
     /* progress bar */
 
-    @keyframes reveal-bar {
-      from { clip-path: inset(0 100% 0 0); }
-      to   { clip-path: inset(0 0% 0 0); }
-    }
-
     #progressBar {
       position: fixed;
       bottom: 0;
@@ -308,14 +303,16 @@
       return DEV ? { work: 8, rest: 5 } : { work: settings.workSeconds, rest: settings.restSeconds };
     }
 
-    let running      = false;
-    let phase        = 'work'; // 'work' | 'rest' | 'done'
-    let elapsed      = 0;
-    let round        = 1;
-    let totalSeconds = 0;
-    let interval     = null;
-    let audioCtx     = null; // created on first tap (ios requirement)
-    let wakeLock     = null; // screen wake lock, acquired while running
+    let running        = false;
+    let phase          = 'work'; // 'work' | 'rest' | 'done'
+    let elapsedMs      = 0;      // milliseconds within current phase
+    let round          = 1;
+    let totalMs        = 0;      // milliseconds since workout start
+    let rafId          = null;   // requestanimationframe handle
+    let lastTimestamp  = null;   // set to null when paused, used to compute delta
+    let lastBeepSecond = -1;     // guards against firing beeps multiple times per second
+    let audioCtx       = null;   // created on first tap (ios requirement)
+    let wakeLock       = null;   // screen wake lock, acquired while running
 
     const SOUNDS = {
       countdownTickWork: [
@@ -419,29 +416,34 @@
       progressBar.replaceChildren(...children);
     }
 
-    function setBarPlayState(state) {
+    function updateProgressBar() {
       if (settings.targetRounds === 0) { return; }
+      const phases = phaseDurations();
+      const totalDurationMs = (settings.targetRounds * phases.work + (settings.targetRounds - 1) * phases.rest) * 1000;
+      const pct = Math.min(totalMs / totalDurationMs * 100, 100);
       const fill = document.getElementById('progressFill');
-      if (fill) { fill.style.animationPlayState = state; }
+      if (fill) { fill.style.clipPath = `inset(0 ${(100 - pct).toFixed(2)}% 0 0)`; }
     }
 
-    function startBarAnimation() {
-      if (settings.targetRounds === 0) { return; }
-      const fill = document.getElementById('progressFill');
-      if (!fill) { return; }
-      const phases = phaseDurations();
-      const totalDuration = settings.targetRounds * phases.work + (settings.targetRounds - 1) * phases.rest;
-      fill.style.animation = `reveal-bar ${totalDuration}s linear forwards`;
-      fill.style.animationPlayState = 'running';
+    function frame(timestamp) {
+      rafId = requestAnimationFrame(frame);
+      if (running) {
+        const delta = lastTimestamp === null ? 0 : timestamp - lastTimestamp;
+        elapsedMs += delta;
+        totalMs   += delta;
+        updateProgressBar(); // every frame for smooth animation
+        tick();              // only updates dom text when the displayed second changes
+      }
+      lastTimestamp = running ? timestamp : null;
     }
 
     function render() {
       const phases = phaseDurations();
-      const timeRemaining = phase === 'done' ? 0 : phases[phase] - elapsed;
+      const timeRemaining = phase === 'done' ? 0 : phases[phase] - Math.floor(elapsedMs / 1000);
       document.body.dataset.phase = phase;
       const roundSuffix = settings.targetRounds > 0 ? ` / ${settings.targetRounds}` : '';
       document.getElementById('round').textContent         = `Round ${round}${roundSuffix}`;
-      document.getElementById('totalTime').textContent     = formatTimer(totalSeconds);
+      document.getElementById('totalTime').textContent     = formatTimer(Math.floor(totalMs / 1000));
       document.getElementById('phase').textContent         = phase === 'work' ? 'Work' : phase === 'rest' ? 'Rest' : 'Done';
       document.getElementById('timer').textContent         = formatTimer(timeRemaining);
       document.getElementById('startPauseBtn').textContent = running ? 'Pause' : 'Start';
@@ -449,18 +451,20 @@
     }
 
     function tick() {
-      const phases = phaseDurations();
-      elapsed++;
-      totalSeconds++;
-      if (elapsed >= phases[phase]) {
+      const phases     = phaseDurations();
+      const phaseDurMs = phases[phase] * 1000;
+
+      if (elapsedMs >= phaseDurMs) {
+        elapsedMs -= phaseDurMs; // carry over overshoot to keep timing accurate
+        lastBeepSecond = -1;
         if (phase === 'work') {
           if (settings.targetRounds > 0 && round >= settings.targetRounds) {
             // last round complete — stop and show done state
-            clearInterval(interval);
-            interval = null;
+            cancelAnimationFrame(rafId);
+            rafId    = null;
             running  = false;
             phase    = 'done';
-            elapsed  = 0;
+            elapsedMs = 0;
             if (wakeLock) { wakeLock.release(); wakeLock = null; }
             playSound(SOUNDS.workoutComplete);
             render();
@@ -473,10 +477,19 @@
           round++;
           playSound(SOUNDS.transitionToWork);
         }
-        elapsed = 0;
-      } else if (elapsed >= phases[phase] - 3) {
+        render();
+        return;
+      }
+
+      // raf fires ~60fps, so gate all side effects on integer second changes
+      const elapsedSeconds = Math.floor(elapsedMs / 1000);
+      if (elapsedSeconds === lastBeepSecond) { return; } // same second, nothing to do
+      lastBeepSecond = elapsedSeconds;
+
+      const timeRemaining = phases[phase] - elapsedSeconds;
+      if (timeRemaining <= 3) {
         playSound(phase === 'work' ? SOUNDS.countdownTickWork : SOUNDS.countdownTickRest);
-      } else if (phase === 'work' && elapsed % 5 === 0) {
+      } else if (phase === 'work' && elapsedSeconds > 0 && elapsedSeconds % 5 === 0) {
         playSound(SOUNDS.workPulse);
       }
       render();
@@ -493,34 +506,27 @@
       running = !running;
       if (running) {
         playSound(phase === 'work' ? SOUNDS.transitionToWork : SOUNDS.transitionToRest);
-        interval = setInterval(tick, 1000);
+        if (rafId === null) { rafId = requestAnimationFrame(frame); } // first start only
         // acquire wake lock to keep screen on during workout
         if ('wakeLock' in navigator) {
           navigator.wakeLock.request('screen').then(lock => { wakeLock = lock; });
         }
-        // start animation fresh if at workout beginning, otherwise resume paused animation
-        if (elapsed === 0 && round === 1) {
-          startBarAnimation();
-        } else {
-          setBarPlayState('running');
-        }
       } else {
-        clearInterval(interval);
-        interval = null;
         if (wakeLock) { wakeLock.release(); wakeLock = null; }
-        setBarPlayState('paused');
       }
       render();
     }
 
     function reset() {
-      clearInterval(interval);
-      interval     = null;
-      running      = false;
-      phase        = 'work';
-      elapsed      = 0;
-      round        = 1;
-      totalSeconds = 0;
+      if (wakeLock) { wakeLock.release(); wakeLock = null; }
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      running        = false;
+      phase          = 'work';
+      elapsedMs      = 0;
+      totalMs        = 0;
+      round          = 1;
+      lastTimestamp  = null;
+      lastBeepSecond = -1;
       buildProgressSegments();
       render();
     }
