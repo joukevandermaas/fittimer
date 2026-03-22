@@ -11,6 +11,9 @@ Before committing, do the following steps in order:
    - All comments are fully lowercase — no uppercase letters at all
    - All names are fully descriptive — no abbreviations
    - Every `if`, `for`, `while`, etc. uses blocks `{ }`, no blockless one-liners
+   - One statement per line — no multiple statements separated by semicolons on the same line
+   - No long if-bodies that could instead be a short inverted early exit (return, break, continue)
+   - Every function has a short comment on its first line (after the opening brace), followed by a blank line
 
    Fix any violations you find before committing.
 

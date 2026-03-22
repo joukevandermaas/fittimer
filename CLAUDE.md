@@ -23,9 +23,24 @@ The file must stay small enough to fit comfortably in a single context window. T
 
 ## Code style
 - Comments are all lowercase, no uppercase characters at all — e.g. `// start the audio context after user gesture`
-- Use a small assert helper for invariants: `function assert(cond, msg) { if (!cond) console.error('assert:', msg); }` — use it liberally to catch bad state early
+- Use a small assert helper for invariants — use it liberally to catch bad state early:
+  ```js
+  function assert(cond, msg) {
+    if (!cond) { console.error('assert:', msg); }
+  }
+  ```
 - Always use full descriptive names — no abbreviations. `formatTimer` not `fmt`, `totalSeconds` not `s`
 - Always use blocks `{ }` for if/for/while/etc — never blockless one-liners
+- One statement per line — never separate multiple statements with a semicolon on the same line
+- Prefer short blocks with early exits over long nested if-bodies. If a condition leads to a long block, invert it and exit early (`return`, `break`, `continue`) so the long code stays flat
+- Each function starts with a short comment on the first line after the opening brace, followed by a blank line. It should say what the function does in the context of the whole app — not just restate the name:
+  ```js
+  function formatTimer(seconds) {
+    // format a second count as m:ss for display
+
+    ...
+  }
+  ```
 
 ## Commit style
 Single sentence, active verb, present tense. E.g. "add audio cues for phase transitions" or "fix timer reset not stopping interval". No period at the end.

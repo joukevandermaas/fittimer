@@ -270,8 +270,11 @@
   </dialog>
 
   <script>
-    // assert helper — use liberally to catch bad state early
-    function assert(cond, msg) { if (!cond) console.error('assert:', msg); }
+    function assert(cond, msg) {
+      // catch bad state early — use liberally
+
+      if (!cond) { console.error('assert:', msg); }
+    }
 
     const DEV = location.search.includes('dev');
 
@@ -288,18 +291,24 @@
     let settings = { ...DEFAULT_SETTINGS };
 
     function loadSettings() {
+      // restore persisted settings from localstorage on startup
+
       const saved = localStorage.getItem('fitSettings');
-      if (saved) {
-        try { Object.assign(settings, JSON.parse(saved)); } catch (e) {}
-      }
+      if (!saved) { return; }
+      try {
+        Object.assign(settings, JSON.parse(saved));
+      } catch (e) {}
     }
 
     function saveSettings() {
+      // persist current settings to localstorage
+
       localStorage.setItem('fitSettings', JSON.stringify(settings));
     }
 
-    // in dev mode, use short fixed durations regardless of settings
     function phaseDurations() {
+      // return work/rest durations in seconds, shortened in dev mode
+
       return DEV ? { work: 8, rest: 5 } : { work: settings.workSeconds, rest: settings.restSeconds };
     }
 
@@ -341,6 +350,8 @@
     };
 
     function playTone({ frequency, duration, delay }) {
+      // schedule a single oscillator tone through the web audio api
+
       assert(audioCtx, 'playTone called before audioCtx exists');
       const oscillator = audioCtx.createOscillator();
       const gain       = audioCtx.createGain();
@@ -357,18 +368,24 @@
     }
 
     function playSound(tones) {
+      // play a sequence of tones that make up a sound cue
+
       for (const tone of tones) {
         playTone(tone);
       }
     }
 
     function formatTimer(seconds) {
-      const minutes = Math.floor(seconds / 60);
+      // format a second count as m:ss for display
+
+      const minutes   = Math.floor(seconds / 60);
       const remainder = seconds % 60;
       return `${minutes}:${String(remainder).padStart(2, '0')}`;
     }
 
     function buildProgressSegments() {
+      // rebuild the progress bar segments to match current settings
+
       const progressBar = document.getElementById('progressBar');
       if (settings.targetRounds === 0) {
         progressBar.style.display = 'none';
@@ -417,6 +434,8 @@
     }
 
     function updateProgressBar() {
+      // advance the fill position to reflect total elapsed workout time
+
       if (settings.targetRounds === 0) { return; }
       const phases = phaseDurations();
       const totalDurationMs = (settings.targetRounds * phases.work + (settings.targetRounds - 1) * phases.rest) * 1000;
@@ -426,6 +445,8 @@
     }
 
     function frame(timestamp) {
+      // requestanimationframe callback — drives the timer and progress bar each frame
+
       rafId = requestAnimationFrame(frame);
       if (running) {
         const delta = lastTimestamp === null ? 0 : timestamp - lastTimestamp;
@@ -438,6 +459,8 @@
     }
 
     function render() {
+      // update all dom elements to reflect current state
+
       const phases = phaseDurations();
       const timeRemaining = phase === 'done' ? 0 : phases[phase] - Math.floor(elapsedMs / 1000);
       document.body.dataset.phase = phase;
@@ -451,52 +474,58 @@
     }
 
     function tick() {
+      // handle phase transitions and audio cues, called each second via the raf loop
+
       const phases     = phaseDurations();
       const phaseDurMs = phases[phase] * 1000;
 
-      if (elapsedMs >= phaseDurMs) {
-        elapsedMs -= phaseDurMs; // carry over overshoot to keep timing accurate
-        lastBeepSecond = -1;
-        if (phase === 'work') {
-          if (settings.targetRounds > 0 && round >= settings.targetRounds) {
-            // last round complete — stop and show done state
-            cancelAnimationFrame(rafId);
-            rafId    = null;
-            running  = false;
-            phase    = 'done';
-            elapsedMs = 0;
-            if (wakeLock) { wakeLock.release(); wakeLock = null; }
-            playSound(SOUNDS.workoutComplete);
-            render();
-            return;
-          }
-          phase = 'rest';
-          playSound(SOUNDS.transitionToRest);
-        } else {
-          phase = 'work';
-          round++;
-          playSound(SOUNDS.transitionToWork);
+      if (elapsedMs < phaseDurMs) {
+        // raf fires ~60fps, so gate all side effects on integer second changes
+        const elapsedSeconds = Math.floor(elapsedMs / 1000);
+        if (elapsedSeconds === lastBeepSecond) { return; } // same second, nothing to do
+        lastBeepSecond = elapsedSeconds;
+
+        const timeRemaining = phases[phase] - elapsedSeconds;
+        if (timeRemaining <= 3) {
+          playSound(phase === 'work' ? SOUNDS.countdownTickWork : SOUNDS.countdownTickRest);
+        } else if (phase === 'work' && elapsedSeconds > 0 && elapsedSeconds % 5 === 0) {
+          playSound(SOUNDS.workPulse);
         }
         render();
         return;
       }
 
-      // raf fires ~60fps, so gate all side effects on integer second changes
-      const elapsedSeconds = Math.floor(elapsedMs / 1000);
-      if (elapsedSeconds === lastBeepSecond) { return; } // same second, nothing to do
-      lastBeepSecond = elapsedSeconds;
-
-      const timeRemaining = phases[phase] - elapsedSeconds;
-      if (timeRemaining <= 3) {
-        playSound(phase === 'work' ? SOUNDS.countdownTickWork : SOUNDS.countdownTickRest);
-      } else if (phase === 'work' && elapsedSeconds > 0 && elapsedSeconds % 5 === 0) {
-        playSound(SOUNDS.workPulse);
+      elapsedMs -= phaseDurMs; // carry over overshoot to keep timing accurate
+      lastBeepSecond = -1;
+      if (phase === 'work') {
+        if (settings.targetRounds > 0 && round >= settings.targetRounds) {
+          // last round complete — stop and show done state
+          cancelAnimationFrame(rafId);
+          rafId     = null;
+          running   = false;
+          phase     = 'done';
+          elapsedMs = 0;
+          if (wakeLock) {
+            wakeLock.release();
+            wakeLock = null;
+          }
+          playSound(SOUNDS.workoutComplete);
+          render();
+          return;
+        }
+        phase = 'rest';
+        playSound(SOUNDS.transitionToRest);
+      } else {
+        phase = 'work';
+        round++;
+        playSound(SOUNDS.transitionToWork);
       }
       render();
     }
 
     function toggle() {
-      // create and resume audio context on first user gesture (ios requirement)
+      // start or pause the workout, and unlock the audio context on ios
+
       if (!audioCtx) { audioCtx = new AudioContext(); }
       if (audioCtx.state === 'suspended') { audioCtx.resume(); }
 
@@ -504,22 +533,35 @@
       if (phase === 'done') { reset(); }
 
       running = !running;
-      if (running) {
-        playSound(phase === 'work' ? SOUNDS.transitionToWork : SOUNDS.transitionToRest);
-        if (rafId === null) { rafId = requestAnimationFrame(frame); } // first start only
-        // acquire wake lock to keep screen on during workout
-        if ('wakeLock' in navigator) {
-          navigator.wakeLock.request('screen').then(lock => { wakeLock = lock; });
+      if (!running) {
+        if (wakeLock) {
+          wakeLock.release();
+          wakeLock = null;
         }
-      } else {
-        if (wakeLock) { wakeLock.release(); wakeLock = null; }
+        render();
+        return;
+      }
+
+      playSound(phase === 'work' ? SOUNDS.transitionToWork : SOUNDS.transitionToRest);
+      if (rafId === null) { rafId = requestAnimationFrame(frame); } // first start only
+      // acquire wake lock to keep screen on during workout
+      if ('wakeLock' in navigator) {
+        navigator.wakeLock.request('screen').then(lock => { wakeLock = lock; });
       }
       render();
     }
 
     function reset() {
-      if (wakeLock) { wakeLock.release(); wakeLock = null; }
-      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      // reset all state to the beginning of the first work phase
+
+      if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+      }
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       running        = false;
       phase          = 'work';
       elapsedMs      = 0;
@@ -532,6 +574,8 @@
     }
 
     function openSettings() {
+      // populate inputs with current settings and show the settings dialog
+
       document.getElementById('workInput').value   = settings.workSeconds;
       document.getElementById('restInput').value   = settings.restSeconds;
       document.getElementById('roundsInput').value = settings.targetRounds;
@@ -539,6 +583,8 @@
     }
 
     function applySettings() {
+      // read form inputs, clamp values, save, and reset the timer
+
       const workValue   = parseInt(document.getElementById('workInput').value, 10);
       const restValue   = parseInt(document.getElementById('restInput').value, 10);
       const roundsValue = parseInt(document.getElementById('roundsInput').value, 10);
