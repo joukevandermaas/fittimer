@@ -46,13 +46,6 @@
     body[data-phase="rest"] #phase { color: #4098e0; }
     body[data-phase="done"] #phase { color: #40c060; }
 
-    #timerBlock {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 0.25rem;
-    }
-
     #timer {
       font-size: min(22vw, 28vh);
       font-weight: 700;
@@ -73,29 +66,34 @@
       color: #fff;
       cursor: pointer;
       text-transform: uppercase;
-      letter-spacing: 0.12em;
       -webkit-tap-highlight-color: transparent;
     }
+
+    .pill-btn {
+      border: 2px solid #fff;
+      border-radius: 2rem;
+      letter-spacing: 0.12em;
+    }
+
+    .pill-btn:active {
+      background: #fff;
+      color: #000;
+    }
+
+    .ghost-btn { opacity: 0.3; }
+
+    .ghost-btn:active { opacity: 0.7; }
 
     #startPauseBtn {
       font-size: 1.1rem;
       padding: 0.9rem 3rem;
-      border: 2px solid #fff;
-      border-radius: 2rem;
-    }
-
-    #startPauseBtn:active {
-      background: #fff;
-      color: #000;
     }
 
     #resetBtn {
       font-size: 0.9rem;
       padding: 0.5rem;
-      opacity: 0.3;
+      letter-spacing: 0.12em;
     }
-
-    #resetBtn:active { opacity: 0.7; }
 
     #settingsBtn, #closeSettingsBtn {
       position: absolute;
@@ -104,14 +102,10 @@
       width: 44px;
       height: 44px;
       font-size: 1.25rem;
-      letter-spacing: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      opacity: 0.3;
     }
-
-    #settingsBtn:active, #closeSettingsBtn:active { opacity: 0.7; }
 
     /* settings dialog */
 
@@ -137,7 +131,6 @@
 
     dialog::backdrop { display: none; }
 
-
     #settingsForm { display: contents; }
 
     #presets, #fields, #doneBtn {
@@ -155,8 +148,6 @@
       padding: 0.55rem 0.25rem;
       border: 1px solid #444;
       border-radius: 0.75rem;
-      letter-spacing: 0;
-      opacity: 1;
     }
 
     .presetBtn:active { background: #333; }
@@ -195,14 +186,7 @@
     #doneBtn {
       font-size: 1rem;
       padding: 0.75rem 2rem;
-      border: 2px solid #fff;
-      border-radius: 2rem;
       align-self: center;
-    }
-
-    #doneBtn:active {
-      background: #fff;
-      color: #000;
     }
 
     /* progress bar */
@@ -213,11 +197,7 @@
       left: 0;
       width: 100%;
       height: 4px;
-      display: grid;
     }
-
-    .seg-work { background: rgba(255, 96, 64, 0.2); }
-    .seg-rest { background: rgba(64, 152, 224, 0.2); }
 
     #progressFill {
       position: absolute;
@@ -235,19 +215,17 @@
     <span id="totalTime">0:00</span>
   </div>
   <div id="phase">Work</div>
-  <div id="timerBlock">
-    <div id="timer">0:00</div>
-  </div>
-  <button id="settingsBtn">⚙</button>
+  <div id="timer">0:00</div>
+  <button id="settingsBtn" class="ghost-btn">⚙</button>
   <div id="buttons">
-    <button id="startPauseBtn">Start</button>
-    <button id="resetBtn">Reset</button>
+    <button id="startPauseBtn" class="pill-btn">Start</button>
+    <button id="resetBtn" class="ghost-btn">Reset</button>
   </div>
 
   <div id="progressBar"></div>
 
   <dialog id="settingsDialog">
-    <button id="closeSettingsBtn">✕</button>
+    <button id="closeSettingsBtn" class="ghost-btn">✕</button>
     <div id="presets">
       <button class="presetBtn" data-preset="0">20/10 ×8</button>
       <button class="presetBtn" data-preset="1">30/15 ×10</button>
@@ -265,7 +243,7 @@
         <input type="number" id="roundsInput" min="0" max="99">
         <span class="hint">0 = ∞</span>
       </div>
-      <button id="doneBtn">Done</button>
+      <button id="doneBtn" class="pill-btn">Done</button>
     </form>
   </dialog>
 
@@ -384,7 +362,7 @@
     }
 
     function buildProgressSegments() {
-      // rebuild the progress bar segments to match current settings
+      // rebuild the progress bar background gradient and fill to match current settings
 
       const progressBar = document.getElementById('progressBar');
       if (settings.targetRounds === 0) {
@@ -394,43 +372,33 @@
       progressBar.style.display = '';
 
       const phases = phaseDurations();
-      const totalFractions = settings.targetRounds * phases.work + (settings.targetRounds - 1) * phases.rest;
-      const columns = [];
-      const children = [];
-      const gradientStops = [];
-      let accumulated = 0;
+      const total  = settings.targetRounds * phases.work + (settings.targetRounds - 1) * phases.rest;
+      const dimStops    = [];
+      const brightStops = [];
+      let accumulated   = 0;
 
       for (let i = 0; i < settings.targetRounds; i++) {
-        columns.push(`${phases.work}fr`);
-        const workSeg = document.createElement('div');
-        workSeg.className = 'seg-work';
-        children.push(workSeg);
-
-        const workStart = (accumulated / totalFractions * 100).toFixed(4);
+        const workStart = (accumulated / total * 100).toFixed(4);
         accumulated += phases.work;
-        const workEnd = (accumulated / totalFractions * 100).toFixed(4);
-        gradientStops.push(`#ff6040 ${workStart}%`, `#ff6040 ${workEnd}%`);
+        const workEnd = (accumulated / total * 100).toFixed(4);
+        dimStops.push(`rgba(255,96,64,0.2) ${workStart}%`, `rgba(255,96,64,0.2) ${workEnd}%`);
+        brightStops.push(`#ff6040 ${workStart}%`, `#ff6040 ${workEnd}%`);
 
         if (i < settings.targetRounds - 1) {
-          columns.push(`${phases.rest}fr`);
-          const restSeg = document.createElement('div');
-          restSeg.className = 'seg-rest';
-          children.push(restSeg);
-
-          const restStart = (accumulated / totalFractions * 100).toFixed(4);
+          const restStart = (accumulated / total * 100).toFixed(4);
           accumulated += phases.rest;
-          const restEnd = (accumulated / totalFractions * 100).toFixed(4);
-          gradientStops.push(`#4098e0 ${restStart}%`, `#4098e0 ${restEnd}%`);
+          const restEnd = (accumulated / total * 100).toFixed(4);
+          dimStops.push(`rgba(64,152,224,0.2) ${restStart}%`, `rgba(64,152,224,0.2) ${restEnd}%`);
+          brightStops.push(`#4098e0 ${restStart}%`, `#4098e0 ${restEnd}%`);
         }
       }
 
+      progressBar.style.background = `linear-gradient(to right, ${dimStops.join(', ')})`;
+
       const fill = document.createElement('div');
       fill.id = 'progressFill';
-      fill.style.background = `linear-gradient(to right, ${gradientStops.join(', ')})`;
-      children.push(fill);
-
-      progressBar.style.gridTemplateColumns = columns.join(' ');
-      progressBar.replaceChildren(...children);
+      fill.style.background = `linear-gradient(to right, ${brightStops.join(', ')})`;
+      progressBar.replaceChildren(fill);
     }
 
     function updateProgressBar() {
@@ -439,23 +407,9 @@
       if (settings.targetRounds === 0) { return; }
       const phases = phaseDurations();
       const totalDurationMs = (settings.targetRounds * phases.work + (settings.targetRounds - 1) * phases.rest) * 1000;
-      const pct = Math.min(totalMs / totalDurationMs * 100, 100);
+      const percentage = Math.min(totalMs / totalDurationMs * 100, 100);
       const fill = document.getElementById('progressFill');
-      if (fill) { fill.style.clipPath = `inset(0 ${(100 - pct).toFixed(2)}% 0 0)`; }
-    }
-
-    function frame(timestamp) {
-      // requestanimationframe callback — drives the timer and progress bar each frame
-
-      rafId = requestAnimationFrame(frame);
-      if (running) {
-        const delta = lastTimestamp === null ? 0 : timestamp - lastTimestamp;
-        elapsedMs += delta;
-        totalMs   += delta;
-        updateProgressBar(); // every frame for smooth animation
-        tick();              // only updates dom text when the displayed second changes
-      }
-      lastTimestamp = running ? timestamp : null;
+      if (fill) { fill.style.clipPath = `inset(0 ${(100 - percentage).toFixed(2)}% 0 0)`; }
     }
 
     function render() {
@@ -473,8 +427,84 @@
       document.getElementById('settingsBtn').style.display = running ? 'none' : '';
     }
 
-    function tick() {
-      // handle phase transitions and audio cues, called each second via the raf loop
+    function frame(timestamp) {
+      // requestanimationframe callback — drives the timer and progress bar each frame
+
+      rafId = requestAnimationFrame(frame);
+      if (running) {
+        const delta = lastTimestamp === null ? 0 : timestamp - lastTimestamp;
+        elapsedMs += delta;
+        totalMs   += delta;
+        updateProgressBar(); // every frame for smooth animation
+        advance();           // only updates dom text when the displayed second changes
+      }
+      lastTimestamp = running ? timestamp : null;
+    }
+
+    // --- level 2: state mutators ---
+    // these transition state in a consistent way and do not call render
+
+    function start() {
+      // set running state and acquire wake lock — only plays the phase cue at elapsedMs === 0 (not on resume)
+
+      running = true;
+      if (elapsedMs === 0) {
+        playSound(phase === 'work' ? SOUNDS.transitionToWork : SOUNDS.transitionToRest);
+      }
+      if (rafId === null) { rafId = requestAnimationFrame(frame); }
+      if ('wakeLock' in navigator) {
+        navigator.wakeLock.request('screen').then(lock => { wakeLock = lock; });
+      }
+    }
+
+    function pause() {
+      // clear running state and release wake lock
+
+      running = false;
+      if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+      }
+    }
+
+    function finish() {
+      // end the workout — stop the raf loop, set done state, play completion sound
+      // called from advance() because workout completion is time-driven, not user-driven
+
+      cancelAnimationFrame(rafId);
+      rafId     = null;
+      running   = false;
+      phase     = 'done';
+      elapsedMs = 0;
+      if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+      }
+      playSound(SOUNDS.workoutComplete);
+    }
+
+    function resetWorkout() {
+      // reset all workout variables to start of round 1 — does not touch settings
+
+      if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+      }
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      running        = false;
+      phase          = 'work';
+      elapsedMs      = 0;
+      totalMs        = 0;
+      round          = 1;
+      lastTimestamp  = null;
+      lastBeepSecond = -1;
+    }
+
+    function advance() {
+      // handle phase transitions and audio cues — called each second via the raf loop
 
       const phases     = phaseDurations();
       const phaseDurMs = phases[phase] * 1000;
@@ -499,17 +529,8 @@
       lastBeepSecond = -1;
       if (phase === 'work') {
         if (settings.targetRounds > 0 && round >= settings.targetRounds) {
-          // last round complete — stop and show done state
-          cancelAnimationFrame(rafId);
-          rafId     = null;
-          running   = false;
-          phase     = 'done';
-          elapsedMs = 0;
-          if (wakeLock) {
-            wakeLock.release();
-            wakeLock = null;
-          }
-          playSound(SOUNDS.workoutComplete);
+          // workout done — finish is called here because completion is time-driven, not from a user event
+          finish();
           render();
           return;
         }
@@ -523,57 +544,34 @@
       render();
     }
 
-    function toggle() {
-      // start or pause the workout, and unlock the audio context on ios
+    // --- level 3: event handlers ---
+    // these compose state mutators to handle user actions — they should not call each other
+
+    function onToggle() {
+      // handle start/pause button — also unlocks audio context on ios
 
       if (!audioCtx) { audioCtx = new AudioContext(); }
       if (audioCtx.state === 'suspended') { audioCtx.resume(); }
 
-      // if the previous workout completed, reset before starting a new one
-      if (phase === 'done') { reset(); }
+      if (phase === 'done') { resetWorkout(); }
 
-      running = !running;
-      if (!running) {
-        if (wakeLock) {
-          wakeLock.release();
-          wakeLock = null;
-        }
-        render();
-        return;
-      }
-
-      playSound(phase === 'work' ? SOUNDS.transitionToWork : SOUNDS.transitionToRest);
-      if (rafId === null) { rafId = requestAnimationFrame(frame); } // first start only
-      // acquire wake lock to keep screen on during workout
-      if ('wakeLock' in navigator) {
-        navigator.wakeLock.request('screen').then(lock => { wakeLock = lock; });
+      if (running) {
+        pause();
+      } else {
+        start();
       }
       render();
     }
 
-    function reset() {
-      // reset all state to the beginning of the first work phase
+    function onReset() {
+      // handle reset button — restore workout to initial state
 
-      if (wakeLock) {
-        wakeLock.release();
-        wakeLock = null;
-      }
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-      running        = false;
-      phase          = 'work';
-      elapsedMs      = 0;
-      totalMs        = 0;
-      round          = 1;
-      lastTimestamp  = null;
-      lastBeepSecond = -1;
+      resetWorkout();
       buildProgressSegments();
       render();
     }
 
-    function openSettings() {
+    function onOpenSettings() {
       // populate inputs with current settings and show the settings dialog
 
       document.getElementById('workInput').value   = settings.workSeconds;
@@ -582,7 +580,7 @@
       document.getElementById('settingsDialog').showModal();
     }
 
-    function applySettings() {
+    function onApplySettings() {
       // read form inputs, clamp values, save, and reset the timer
 
       const workValue   = parseInt(document.getElementById('workInput').value, 10);
@@ -592,12 +590,14 @@
       settings.restSeconds  = Math.max(5, isNaN(restValue)   ? DEFAULT_SETTINGS.restSeconds  : restValue);
       settings.targetRounds = Math.max(0, isNaN(roundsValue) ? DEFAULT_SETTINGS.targetRounds : roundsValue);
       saveSettings();
-      reset();
+      resetWorkout();
+      buildProgressSegments();
+      render();
     }
 
-    document.querySelectorAll('.presetBtn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const preset = PRESETS[btn.dataset.preset];
+    document.querySelectorAll('.presetBtn').forEach(button => {
+      button.addEventListener('click', () => {
+        const preset = PRESETS[button.dataset.preset];
         document.getElementById('workInput').value   = preset.workSeconds;
         document.getElementById('restInput').value   = preset.restSeconds;
         document.getElementById('roundsInput').value = preset.targetRounds;
@@ -610,7 +610,7 @@
 
     document.getElementById('settingsForm').addEventListener('submit', (e) => {
       e.preventDefault();
-      applySettings();
+      onApplySettings();
       document.getElementById('settingsDialog').close();
     });
 
@@ -618,9 +618,9 @@
       document.getElementById('settingsDialog').close();
     });
 
-    document.getElementById('settingsBtn').addEventListener('click', openSettings);
-    document.getElementById('startPauseBtn').addEventListener('click', toggle);
-    document.getElementById('resetBtn').addEventListener('click', reset);
+    document.getElementById('settingsBtn').addEventListener('click', onOpenSettings);
+    document.getElementById('startPauseBtn').addEventListener('click', onToggle);
+    document.getElementById('resetBtn').addEventListener('click', onReset);
 
     // re-acquire wake lock if page becomes visible again while running
     document.addEventListener('visibilitychange', () => {

@@ -9,6 +9,8 @@ This is a single `index.html` file. All code (HTML, CSS, JS) lives in that one f
 ## 3. Minimal JS, no libraries
 Use as little JavaScript as possible. Prefer plain HTML/CSS solutions. When JS is needed, write it plainly — no libraries, ever. Someone with basic web knowledge should be able to read the file and understand what it does.
 
+Before writing or changing JS, read `README.md` for the JS architecture (three layers: core, state mutators, event handlers). New functions must fit the layering — functions may only call downward.
+
 ## 4. Style is secondary
 The app working correctly matters far more than how it looks. Keep styles minimal and purposeful. Avoid decorative complexity.
 
