@@ -204,6 +204,34 @@
       background: #fff;
       color: #000;
     }
+
+    /* progress bar */
+
+    @keyframes reveal-bar {
+      from { clip-path: inset(0 100% 0 0); }
+      to   { clip-path: inset(0 0% 0 0); }
+    }
+
+    #progressBar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      display: grid;
+    }
+
+    .seg-work { background: rgba(255, 96, 64, 0.2); }
+    .seg-rest { background: rgba(64, 152, 224, 0.2); }
+
+    #progressFill {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 100%;
+      clip-path: inset(0 100% 0 0);
+    }
   </style>
 </head>
 <body data-phase="work">
@@ -220,6 +248,8 @@
     <button id="startPauseBtn">Start</button>
     <button id="resetBtn">Reset</button>
   </div>
+
+  <div id="progressBar"></div>
 
   <dialog id="settingsDialog">
     <button id="closeSettingsBtn">✕</button>
@@ -341,14 +371,79 @@
       return `${minutes}:${String(remainder).padStart(2, '0')}`;
     }
 
+    function buildProgressSegments() {
+      const progressBar = document.getElementById('progressBar');
+      if (settings.targetRounds === 0) {
+        progressBar.style.display = 'none';
+        return;
+      }
+      progressBar.style.display = '';
+
+      const phases = phaseDurations();
+      const totalFractions = settings.targetRounds * phases.work + (settings.targetRounds - 1) * phases.rest;
+      const columns = [];
+      const children = [];
+      const gradientStops = [];
+      let accumulated = 0;
+
+      for (let i = 0; i < settings.targetRounds; i++) {
+        columns.push(`${phases.work}fr`);
+        const workSeg = document.createElement('div');
+        workSeg.className = 'seg-work';
+        children.push(workSeg);
+
+        const workStart = (accumulated / totalFractions * 100).toFixed(4);
+        accumulated += phases.work;
+        const workEnd = (accumulated / totalFractions * 100).toFixed(4);
+        gradientStops.push(`#ff6040 ${workStart}%`, `#ff6040 ${workEnd}%`);
+
+        if (i < settings.targetRounds - 1) {
+          columns.push(`${phases.rest}fr`);
+          const restSeg = document.createElement('div');
+          restSeg.className = 'seg-rest';
+          children.push(restSeg);
+
+          const restStart = (accumulated / totalFractions * 100).toFixed(4);
+          accumulated += phases.rest;
+          const restEnd = (accumulated / totalFractions * 100).toFixed(4);
+          gradientStops.push(`#4098e0 ${restStart}%`, `#4098e0 ${restEnd}%`);
+        }
+      }
+
+      const fill = document.createElement('div');
+      fill.id = 'progressFill';
+      fill.style.background = `linear-gradient(to right, ${gradientStops.join(', ')})`;
+      children.push(fill);
+
+      progressBar.style.gridTemplateColumns = columns.join(' ');
+      progressBar.replaceChildren(...children);
+    }
+
+    function setBarPlayState(state) {
+      if (settings.targetRounds === 0) { return; }
+      const fill = document.getElementById('progressFill');
+      if (fill) { fill.style.animationPlayState = state; }
+    }
+
+    function startBarAnimation() {
+      if (settings.targetRounds === 0) { return; }
+      const fill = document.getElementById('progressFill');
+      if (!fill) { return; }
+      const phases = phaseDurations();
+      const totalDuration = settings.targetRounds * phases.work + (settings.targetRounds - 1) * phases.rest;
+      fill.style.animation = `reveal-bar ${totalDuration}s linear forwards`;
+      fill.style.animationPlayState = 'running';
+    }
+
     function render() {
       const phases = phaseDurations();
+      const timeRemaining = phase === 'done' ? 0 : phases[phase] - elapsed;
       document.body.dataset.phase = phase;
       const roundSuffix = settings.targetRounds > 0 ? ` / ${settings.targetRounds}` : '';
       document.getElementById('round').textContent         = `Round ${round}${roundSuffix}`;
       document.getElementById('totalTime').textContent     = formatTimer(totalSeconds);
       document.getElementById('phase').textContent         = phase === 'work' ? 'Work' : phase === 'rest' ? 'Rest' : 'Done';
-      document.getElementById('timer').textContent         = phase === 'done' ? '0:00' : formatTimer(phases[phase] - elapsed);
+      document.getElementById('timer').textContent         = formatTimer(timeRemaining);
       document.getElementById('startPauseBtn').textContent = running ? 'Pause' : 'Start';
       document.getElementById('settingsBtn').style.display = running ? 'none' : '';
     }
@@ -403,10 +498,17 @@
         if ('wakeLock' in navigator) {
           navigator.wakeLock.request('screen').then(lock => { wakeLock = lock; });
         }
+        // start animation fresh if at workout beginning, otherwise resume paused animation
+        if (elapsed === 0 && round === 1) {
+          startBarAnimation();
+        } else {
+          setBarPlayState('running');
+        }
       } else {
         clearInterval(interval);
         interval = null;
         if (wakeLock) { wakeLock.release(); wakeLock = null; }
+        setBarPlayState('paused');
       }
       render();
     }
@@ -419,6 +521,7 @@
       elapsed      = 0;
       round        = 1;
       totalSeconds = 0;
+      buildProgressSegments();
       render();
     }
 
@@ -475,6 +578,7 @@
     });
 
     loadSettings();
+    buildProgressSegments();
     render();
   </script>
 </body>

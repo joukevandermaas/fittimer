@@ -8,13 +8,13 @@ Ideas to try. No commitment to any of these.
 - ~~**Workout presets**~~ — done (20/10 ×8, 30/15 ×10, 45/15 ×8)
 
 ## Audio
-- **Periodic work-phase beep** — soft beep every N seconds during work to confirm time is progressing (long intervals feel endless without it); currently every 5s, may need tuning
+- ~~**Periodic work-phase beep**~~ — soft beep every N seconds during work to confirm time is progressing (long intervals feel endless without it); currently every 5s, may need tuning later
 - **Volume control** — simple mute toggle, maybe long-press to adjust level
 - **Sound profiles** — alternative sound sets (e.g. lower-key/less aggressive for late-night use)
 
 ## Screen & display
 - ~~**Both phases count down**~~ — done
-- **Phase progress bar** — thin bar at the top or bottom showing how far through the current phase you are, as an alternative to (or complement of) the counter
+- ~~**Phase progress bar**~~ — thin bar at the bottom showing total workout progress across all rounds, with color-coded work/rest segments
 
 ## Workout structure
 - **Warm-up / cool-down phases** — optional phases at start/end with their own durations and sounds
