@@ -59,12 +59,6 @@
       line-height: 1;
     }
 
-    #phaseDuration {
-      font-size: 1.2rem;
-      font-variant-numeric: tabular-nums;
-      opacity: 0.35;
-    }
-
     #buttons {
       margin-top: 1rem;
       display: flex;
@@ -111,7 +105,6 @@
   <div id="phase">Work</div>
   <div id="timerBlock">
     <div id="timer">0:00</div>
-    <div id="phaseDuration">/ 0:30</div>
   </div>
   <div id="buttons">
     <button id="startPauseBtn">Start</button>
@@ -122,7 +115,7 @@
     // assert helper — use liberally to catch bad state early
     function assert(cond, msg) { if (!cond) console.error('assert:', msg); }
 
-    const DEV = location.hostname === 'localhost'; // shorter timers and no service worker on localhost
+    const DEV = location.search.includes('dev'); // shorter timers and no service worker on localhost
 
     if ('serviceWorker' in navigator && !DEV) {
       navigator.serviceWorker.register('./sw.js');
@@ -154,6 +147,9 @@
         { frequency: 880, duration: 0.1, delay: 0    },
         { frequency: 880, duration: 0.1, delay: 0.13 },
         { frequency: 880, duration: 0.1, delay: 0.26 },
+      ],
+      workPulse: [
+        { frequency: 220, duration: 0.12, delay: 0 },
       ],
     };
 
@@ -190,8 +186,7 @@
       document.getElementById('round').textContent           = `Round ${round}`;
       document.getElementById('totalTime').textContent       = formatTimer(totalSeconds);
       document.getElementById('phase').textContent           = phase === 'work' ? 'Work' : 'Rest';
-      document.getElementById('timer').textContent           = formatTimer(elapsed);
-      document.getElementById('phaseDuration').textContent  = '/ ' + formatTimer(PHASES[phase]);
+      document.getElementById('timer').textContent           = formatTimer(PHASES[phase] - elapsed);
       document.getElementById('startPauseBtn').textContent   = running ? 'Pause' : 'Start';
     }
 
@@ -210,6 +205,8 @@
         elapsed = 0;
       } else if (elapsed >= PHASES[phase] - 3) {
         playSound(phase === 'work' ? SOUNDS.countdownTickWork : SOUNDS.countdownTickRest);
+      } else if (phase === 'work' && elapsed % 5 === 0) {
+        playSound(SOUNDS.workPulse);
       }
       render();
     }

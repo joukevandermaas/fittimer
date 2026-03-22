@@ -8,12 +8,12 @@ Ideas to try. No commitment to any of these.
 - **Workout presets** — named presets like Tabata (20s/10s), long HIIT (45s/15s), endurance (60s/20s)
 
 ## Audio
-- **Get-ready cue** — distinct sound 3s before rest ends so you can get into position without watching the screen
+- **Periodic work-phase beep** — soft beep every N seconds during work to confirm time is progressing (long intervals feel endless without it); currently every 5s, may need tuning
 - **Volume control** — simple mute toggle, maybe long-press to adjust level
 - **Sound profiles** — alternative sound sets (e.g. lower-key/less aggressive for late-night use)
 
 ## Screen & display
-- **Rest counts down** — during rest, show remaining time counting down; work phase keeps counting up
+- ~~**Both phases count down**~~ — done
 - **Phase progress bar** — thin bar at the top or bottom showing how far through the current phase you are, as an alternative to (or complement of) the counter
 
 ## Workout structure
