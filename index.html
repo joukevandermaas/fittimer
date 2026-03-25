@@ -290,16 +290,28 @@
       return DEV ? { work: 8, rest: 5 } : { work: settings.workSeconds, rest: settings.restSeconds };
     }
 
-    let running        = false;
-    let phase          = 'work'; // 'work' | 'rest' | 'done'
-    let elapsedMs      = 0;      // milliseconds within current phase
-    let round          = 1;
-    let totalMs        = 0;      // milliseconds since workout start
-    let rafId          = null;   // requestanimationframe handle
-    let lastTimestamp  = null;   // set to null when paused, used to compute delta
-    let lastBeepSecond = -1;     // guards against firing beeps multiple times per second
-    let audioCtx       = null;   // created on first tap (ios requirement)
-    let wakeLock       = null;   // screen wake lock, acquired while running
+    let timerState          = 'idle'; // 'idle' | 'countdown' | 'active' | 'paused' | 'done'
+    let phase               = 'work'; // 'work' | 'rest'
+    let countdownMs         = 0;      // elapsed ms in the current countdown
+    let phaseElapsedMs      = 0;      // elapsed ms in the current workout phase
+    let workoutMs           = 0;      // total elapsed ms across all workout phases
+    let round               = 1;
+    let lastCountdownSecond = -1;     // guards countdown beeps against firing multiple times
+    // there are two distinct "get ready" countdowns, both showing 3-2-1 with the same visuals and sounds:
+    //
+    // start countdown (timerState === 'countdown'):
+    //   triggered when the user presses start from idle, or resumes after pausing during work.
+    //   the workout clock does NOT tick. pausing resets it to 0 on next start. countdownMs tracks it.
+    //
+    // work countdown (workCountdown === true):
+    //   the final 3 seconds of the rest phase. fully inside the event loop — the workout clock ticks,
+    //   pausing freezes it in place, and it resumes exactly where it left off. driven by the event queue.
+    let workCountdown       = false;  // set by the event queue during rest's final 3 seconds
+    let events              = [];     // scheduled phase events: [{ atMs, fn }], sorted ascending
+    let rafId               = null;
+    let lastTimestamp       = null;
+    let audioCtx            = null;
+    let wakeLock            = null;
 
     const SOUNDS = {
       countdownTickWork: [
@@ -361,6 +373,63 @@
       return `${minutes}:${String(remainder).padStart(2, '0')}`;
     }
 
+    // --- event scheduler ---
+
+    function schedule(atMs, fn) {
+      // insert an event into the sorted phase event queue
+
+      events.push({ atMs, fn });
+      events.sort((a, b) => a.atMs - b.atMs);
+    }
+
+    function clearEvents() {
+      // discard all pending scheduled events
+
+      events = [];
+    }
+
+    function drainEvents() {
+      // fire all events whose scheduled time has arrived
+
+      while (events.length && events[0].atMs <= phaseElapsedMs) {
+        events.shift().fn();
+      }
+    }
+
+    function schedulePhaseEvents() {
+      // precompute and enqueue all audio cues and the end-of-phase transition for the current phase
+      // only schedules events that are still in the future, so it is safe to call when resuming mid-phase
+
+      const phases     = phaseDurations();
+      const durationMs = phases[phase] * 1000;
+      const tickSound  = phase === 'rest' ? SOUNDS.countdownTickRest : SOUNDS.countdownTickWork;
+
+      if (phase === 'work') {
+        for (let t = 5000; t < durationMs - 3000; t += 5000) {
+          if (t > phaseElapsedMs) { schedule(t, () => playSound(SOUNDS.workPulse)); }
+        }
+        for (let i = 3; i >= 1; i--) {
+          const t = durationMs - i * 1000;
+          if (t > phaseElapsedMs) { schedule(t, () => playSound(tickSound)); }
+        }
+        schedule(durationMs, endPhase);
+      } else {
+        const countdownStartMs = durationMs - 3000;
+        if (countdownStartMs > phaseElapsedMs) {
+          schedule(countdownStartMs, () => { workCountdown = true; });
+        } else {
+          workCountdown = true; // resumed mid-work-countdown
+        }
+        for (let i = 3; i >= 1; i--) {
+          const t = durationMs - i * 1000;
+          if (t > phaseElapsedMs) { schedule(t, () => playSound(tickSound)); }
+        }
+        schedule(durationMs, endPhase);
+      }
+    }
+
+    // --- level 1: rendering ---
+
     function buildProgressSegments() {
       // rebuild the progress bar background gradient and fill to match current settings
 
@@ -407,133 +476,176 @@
       if (settings.targetRounds === 0) { return; }
       const phases = phaseDurations();
       const totalDurationMs = (settings.targetRounds * phases.work + (settings.targetRounds - 1) * phases.rest) * 1000;
-      const percentage = Math.min(totalMs / totalDurationMs * 100, 100);
+      const percentage = Math.min(workoutMs / totalDurationMs * 100, 100);
       const fill = document.getElementById('progressFill');
       if (fill) { fill.style.clipPath = `inset(0 ${(100 - percentage).toFixed(2)}% 0 0)`; }
     }
 
     function render() {
-      // update all dom elements to reflect current state
+      // update all dom elements to reflect current timer and workout state
 
-      const phases = phaseDurations();
-      const timeRemaining = phase === 'done' ? 0 : phases[phase] - Math.floor(elapsedMs / 1000);
-      document.body.dataset.phase = phase;
+      const phases    = phaseDurations();
+      const isRunning = timerState === 'active' || timerState === 'countdown';
+
+      let phaseLabel, timerText, dataPhase;
+      if (timerState === 'countdown') {
+        phaseLabel = 'Get Ready';
+        timerText  = String(3 - Math.floor(countdownMs / 1000));
+        dataPhase  = 'work';
+      } else if (timerState === 'done') {
+        phaseLabel = 'Done';
+        timerText  = formatTimer(0);
+        dataPhase  = 'done';
+      } else if (workCountdown) {
+        const timeRemaining = phases[phase] - Math.floor(phaseElapsedMs / 1000);
+        phaseLabel = 'Get Ready';
+        timerText  = String(timeRemaining);
+        dataPhase  = 'rest';
+      } else {
+        const timeRemaining = phases[phase] - Math.floor(phaseElapsedMs / 1000);
+        phaseLabel = phase === 'work' ? 'Work' : 'Rest';
+        timerText  = formatTimer(Math.max(0, timeRemaining));
+        dataPhase  = phase;
+      }
+
       const roundSuffix = settings.targetRounds > 0 ? ` / ${settings.targetRounds}` : '';
+      document.body.dataset.phase                          = dataPhase;
       document.getElementById('round').textContent         = `Round ${round}${roundSuffix}`;
-      document.getElementById('totalTime').textContent     = formatTimer(Math.floor(totalMs / 1000));
-      document.getElementById('phase').textContent         = phase === 'work' ? 'Work' : phase === 'rest' ? 'Rest' : 'Done';
-      document.getElementById('timer').textContent         = formatTimer(timeRemaining);
-      document.getElementById('startPauseBtn').textContent = running ? 'Pause' : 'Start';
-      document.getElementById('settingsBtn').style.display = running ? 'none' : '';
+      document.getElementById('totalTime').textContent     = formatTimer(Math.floor(workoutMs / 1000));
+      document.getElementById('phase').textContent         = phaseLabel;
+      document.getElementById('timer').textContent         = timerText;
+      document.getElementById('startPauseBtn').textContent = isRunning ? 'Pause' : 'Start';
+      document.getElementById('settingsBtn').style.display = isRunning ? 'none' : '';
     }
 
     function frame(timestamp) {
-      // requestanimationframe callback — drives the timer and progress bar each frame
+      // requestanimationframe callback — drives clocks, event queue, and progress bar each frame
 
       rafId = requestAnimationFrame(frame);
-      if (running) {
-        const delta = lastTimestamp === null ? 0 : timestamp - lastTimestamp;
-        elapsedMs += delta;
-        totalMs   += delta;
-        updateProgressBar(); // every frame for smooth animation
-        advance();           // only updates dom text when the displayed second changes
+      const delta = lastTimestamp === null ? 0 : timestamp - lastTimestamp;
+      lastTimestamp = timestamp;
+
+      if (timerState === 'countdown') {
+        countdownMs += delta;
+        const remaining = 3 - Math.floor(countdownMs / 1000);
+        if (remaining !== lastCountdownSecond) {
+          lastCountdownSecond = remaining;
+          if (remaining > 0) { playSound(SOUNDS.countdownTickRest); }
+        }
+        if (countdownMs >= 3000) {
+          playSound(SOUNDS.transitionToWork);
+          enterActive();
+        }
+      } else if (timerState === 'active') {
+        phaseElapsedMs += delta;
+        workoutMs      += delta;
+        drainEvents();
+        updateProgressBar();
       }
-      lastTimestamp = running ? timestamp : null;
+
+      render();
     }
 
-    // --- level 2: state mutators ---
-    // these transition state in a consistent way and do not call render
+    // --- level 2: state transitions ---
 
-    function start() {
-      // set running state and acquire wake lock — only plays the phase cue at elapsedMs === 0 (not on resume)
+    function startRaf() {
+      // begin the animation loop with a zeroed delta on the first frame
 
-      running = true;
-      if (elapsedMs === 0) {
-        playSound(phase === 'work' ? SOUNDS.transitionToWork : SOUNDS.transitionToRest);
-      }
-      if (rafId === null) { rafId = requestAnimationFrame(frame); }
+      if (rafId !== null) { return; }
+      lastTimestamp = null;
+      rafId = requestAnimationFrame(frame);
+    }
+
+    function stopRaf() {
+      // cancel the animation loop and clear the timestamp
+
+      if (rafId !== null) { cancelAnimationFrame(rafId); }
+      rafId         = null;
+      lastTimestamp = null;
+    }
+
+    function acquireWakeLock() {
+      // request screen wake lock to keep the display on during the workout
+
       if ('wakeLock' in navigator) {
         navigator.wakeLock.request('screen').then(lock => { wakeLock = lock; });
       }
     }
 
-    function pause() {
-      // clear running state and release wake lock
+    function releaseWakeLock() {
+      // release the screen wake lock if one is held
 
-      running = false;
       if (wakeLock) {
         wakeLock.release();
         wakeLock = null;
       }
     }
 
-    function finish() {
-      // end the workout — stop the raf loop, set done state, play completion sound
-      // called from advance() because workout completion is time-driven, not user-driven
+    function enterCountdown() {
+      // begin a 3-second get-ready countdown before starting or resuming a work phase
 
-      cancelAnimationFrame(rafId);
-      rafId     = null;
-      running   = false;
-      phase     = 'done';
-      elapsedMs = 0;
-      if (wakeLock) {
-        wakeLock.release();
-        wakeLock = null;
-      }
+      timerState          = 'countdown';
+      countdownMs         = 0;
+      lastCountdownSecond = -1;
+      startRaf();
+    }
+
+    function enterActive() {
+      // start or resume the current workout phase — callers are responsible for playing transition sounds
+
+      timerState = 'active';
+      clearEvents();
+      schedulePhaseEvents();
+      acquireWakeLock();
+      startRaf();
+    }
+
+    function enterPaused() {
+      // freeze the workout — events are discarded and rescheduled fresh on resume
+
+      timerState = 'paused';
+      clearEvents();
+      stopRaf();
+      releaseWakeLock();
+    }
+
+    function enterIdle() {
+      // reset all workout state to the beginning
+
+      stopRaf();
+      releaseWakeLock();
+      clearEvents();
+      timerState     = 'idle';
+      phase          = 'work';
+      phaseElapsedMs = 0;
+      workoutMs      = 0;
+      round          = 1;
+      workCountdown  = false;
+    }
+
+    function enterDone() {
+      // end the workout and play the completion sound
+
+      stopRaf();
+      releaseWakeLock();
+      clearEvents();
+      timerState    = 'done';
+      workCountdown = false;
       playSound(SOUNDS.workoutComplete);
     }
 
-    function resetWorkout() {
-      // reset all workout variables to start of round 1 — does not touch settings
+    function endPhase() {
+      // transition to the next phase — called from the event queue when a phase timer expires
 
-      if (wakeLock) {
-        wakeLock.release();
-        wakeLock = null;
-      }
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-      running        = false;
-      phase          = 'work';
-      elapsedMs      = 0;
-      totalMs        = 0;
-      round          = 1;
-      lastTimestamp  = null;
-      lastBeepSecond = -1;
-    }
+      workCountdown  = false;
+      const phases   = phaseDurations();
+      phaseElapsedMs -= phases[phase] * 1000; // carry over overshoot to keep timing accurate
 
-    function advance() {
-      // handle phase transitions and audio cues — called each second via the raf loop
-
-      const phases     = phaseDurations();
-      const phaseDurMs = phases[phase] * 1000;
-
-      if (elapsedMs < phaseDurMs) {
-        // raf fires ~60fps, so gate all side effects on integer second changes
-        const elapsedSeconds = Math.floor(elapsedMs / 1000);
-        if (elapsedSeconds === lastBeepSecond) { return; } // same second, nothing to do
-        lastBeepSecond = elapsedSeconds;
-
-        const timeRemaining = phases[phase] - elapsedSeconds;
-        if (timeRemaining <= 3) {
-          playSound(phase === 'work' ? SOUNDS.countdownTickWork : SOUNDS.countdownTickRest);
-        } else if (phase === 'work' && elapsedSeconds > 0 && elapsedSeconds % 5 === 0) {
-          playSound(SOUNDS.workPulse);
-        }
-        render();
+      if (phase === 'work' && settings.targetRounds > 0 && round >= settings.targetRounds) {
+        enterDone();
         return;
       }
-
-      elapsedMs -= phaseDurMs; // carry over overshoot to keep timing accurate
-      lastBeepSecond = -1;
       if (phase === 'work') {
-        if (settings.targetRounds > 0 && round >= settings.targetRounds) {
-          // workout done — finish is called here because completion is time-driven, not from a user event
-          finish();
-          render();
-          return;
-        }
         phase = 'rest';
         playSound(SOUNDS.transitionToRest);
       } else {
@@ -541,32 +653,35 @@
         round++;
         playSound(SOUNDS.transitionToWork);
       }
-      render();
+      enterActive();
     }
 
     // --- level 3: event handlers ---
-    // these compose state mutators to handle user actions — they should not call each other
+    // these compose state transitions to handle user actions — they should not call each other
 
     function onToggle() {
-      // handle start/pause button — also unlocks audio context on ios
+      // handle start/pause button — also creates and unlocks audio context on ios
 
       if (!audioCtx) { audioCtx = new AudioContext(); }
       if (audioCtx.state === 'suspended') { audioCtx.resume(); }
 
-      if (phase === 'done') { resetWorkout(); }
+      if (timerState === 'done') { enterIdle(); }
 
-      if (running) {
-        pause();
-      } else {
-        start();
+      if (timerState === 'idle' || (timerState === 'paused' && phase === 'work')) {
+        enterCountdown();
+      } else if (timerState === 'paused' && phase === 'rest') {
+        enterActive();
+      } else if (timerState === 'active' || timerState === 'countdown') {
+        enterPaused();
       }
+
       render();
     }
 
     function onReset() {
       // handle reset button — restore workout to initial state
 
-      resetWorkout();
+      enterIdle();
       buildProgressSegments();
       render();
     }
@@ -590,7 +705,7 @@
       settings.restSeconds  = Math.max(5, isNaN(restValue)   ? DEFAULT_SETTINGS.restSeconds  : restValue);
       settings.targetRounds = Math.max(0, isNaN(roundsValue) ? DEFAULT_SETTINGS.targetRounds : roundsValue);
       saveSettings();
-      resetWorkout();
+      enterIdle();
       buildProgressSegments();
       render();
     }
@@ -622,10 +737,10 @@
     document.getElementById('startPauseBtn').addEventListener('click', onToggle);
     document.getElementById('resetBtn').addEventListener('click', onReset);
 
-    // re-acquire wake lock if page becomes visible again while running
+    // re-acquire wake lock if page becomes visible again while active
     document.addEventListener('visibilitychange', () => {
-      if (running && document.visibilityState === 'visible' && 'wakeLock' in navigator) {
-        navigator.wakeLock.request('screen').then(lock => { wakeLock = lock; });
+      if (timerState === 'active' && document.visibilityState === 'visible') {
+        acquireWakeLock();
       }
     });
 
