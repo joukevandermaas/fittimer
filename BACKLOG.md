@@ -2,25 +2,28 @@
 
 Ideas to try. No commitment to any of these.
 
-## Configuration
-- ~~**Configurable intervals**~~ — done
-- ~~**Round target**~~ — done
-- ~~**Workout presets**~~ — done (20/10 ×8, 30/15 ×10, 45/15 ×8)
+## Small
 
-## Audio
-- ~~**Periodic work-phase beep**~~ — soft beep every N seconds during work to confirm time is progressing (long intervals feel endless without it); currently every 5s, may need tuning later
-- **Volume control** — simple mute toggle, maybe long-press to adjust level
-- **Sound profiles** — alternative sound sets (e.g. lower-key/less aggressive for late-night use)
+1. **Mute toggle** — a speaker icon (like the settings gear) to silence all audio cues. Useful when listening to music. State persists in localStorage.
 
-## Screen & display
-- ~~**Both phases count down**~~ — done
-- ~~**Phase progress bar**~~ — thin bar at the bottom showing total workout progress across all rounds, with color-coded work/rest segments
+2. **Vibration cues** — use `navigator.vibrate()` to mirror audio beeps: short buzz for countdown ticks, long buzz for phase transitions. Lets the phone stay silent without missing cues.
 
-## Workout structure
-- **Warm-up / cool-down phases** — optional phases at start/end with their own durations and sounds
-- **Rest between rounds** — a longer rest every N rounds (e.g. 60s every 4 rounds)
+3. **Skip phase button** — during an active phase, a small ghost button to immediately end it and move on. Handy when you finish early or want to cut a rest short.
 
-## Other
-- **Haptic feedback** — vibrate on phase transitions using the Vibration API (Android + some iOS)
-- **Workout log** — store completed workouts (date, rounds, total time) in localStorage
-- **Share a workout** — encode config in the URL hash so you can send a link that opens with your settings pre-loaded
+4. **Exercise progress dots** — for multi-exercise workouts, small dots below the timer (one per exercise, filled for completed). Pure CSS + minimal DOM, no new logic needed.
+
+5. **Half-time pulse** — a soft mid-phase audio cue at the exact halfway point of a work interval. Helps pace effort without looking at the screen.
+
+## Medium
+
+6. **"Wait for me" rest** — an option where rest doesn't auto-advance; it pauses at 0:00 and waits for the user to tap Start. Useful when recovery time varies. Toggle in settings.
+
+7. **Completion summary** — after Done, show total time + rounds + workout name before resetting. Tapping Start dismisses it.
+
+8. **Landscape layout** — auto-switch to a side-by-side layout in landscape orientation (timer left, controls right). Pure CSS `@media (orientation: landscape)`, no JS.
+
+## Larger
+
+9. **Workout history** — record completion date per workout in localStorage. Show "last done: 3 days ago" on idle screen, optionally a streak count.
+
+10. **Custom workout builder** — extend settings to let users add/remove/reorder exercises in a session, not just the single-exercise manual mode. Stored in localStorage.

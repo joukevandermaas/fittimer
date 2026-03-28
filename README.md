@@ -23,8 +23,8 @@ The JavaScript is organized in three layers. Functions may only call downward.
 **Level 1 — core:** `render`, `frame`, `playTone`, `playSound`, `formatTimer`, `buildProgressSegments`, `updateProgressBar`
 These handle a single responsibility and do not manipulate workout state.
 
-**Level 2 — state mutators:** `start`, `pause`, `finish`, `resetWorkout`, `advance`
-These transition workout state in a consistent way. They do not call `render` and do not call each other — except `advance` calls `finish` because workout completion is time-driven, not user-driven.
+**Level 2 — state mutators:** `enterCountdown`, `enterActive`, `enterPaused`, `enterIdle`, `enterDone`, `exitExercise`, `resetSession`, `endPhase`
+These transition workout state in a consistent way. They do not call `render`. Level-2 functions may call each other when the transition logic requires it (e.g. `endPhase` → `exitExercise` → `enterDone`).
 
 **Level 3 — event handlers:** `onToggle`, `onReset`, `onOpenSettings`, `onApplySettings`
 These are wired to DOM events. They compose level-2 mutators and call `render` once at the end. They do not call each other.

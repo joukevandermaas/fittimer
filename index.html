@@ -107,6 +107,26 @@
       justify-content: center;
     }
 
+    #sessionDetails {
+      display: none;
+      font-size: 0.85rem;
+      opacity: 0.6;
+      line-height: 2;
+      width: min(100%, 300px);
+      grid-template-columns: 1fr auto;
+      column-gap: 1.5rem;
+    }
+
+    #workoutSelect {
+      background: #222;
+      border: 1px solid #444;
+      border-radius: 0.5rem;
+      color: #fff;
+      font-size: 1rem;
+      padding: 0.5rem 0.75rem;
+      width: min(100%, 300px);
+    }
+
     /* settings dialog */
 
     dialog[open] {
@@ -189,26 +209,6 @@
       align-self: center;
     }
 
-    /* progress bar */
-
-    #progressBar {
-      position: fixed;
-      bottom: max(8px, env(safe-area-inset-bottom));
-      left: max(8px, env(safe-area-inset-bottom));
-      right: max(8px, env(safe-area-inset-bottom));
-      height: 4px;
-      border-radius: 2px;
-      overflow: hidden;
-    }
-
-    #progressFill {
-      position: absolute;
-      top: 0;
-      left: 0;
-      height: 100%;
-      width: 100%;
-      clip-path: inset(0 100% 0 0);
-    }
   </style>
 </head>
 <body data-phase="work">
@@ -224,10 +224,10 @@
     <button id="resetBtn" class="ghost-btn">Reset</button>
   </div>
 
-  <div id="progressBar"></div>
-
   <dialog id="settingsDialog">
     <button id="closeSettingsBtn" class="ghost-btn">✕</button>
+    <select id="workoutSelect"></select>
+    <div id="sessionDetails"></div>
     <div id="presets">
       <button class="presetBtn" data-preset="0">20/10 ×8</button>
       <button class="presetBtn" data-preset="1">30/15 ×10</button>
@@ -262,13 +262,43 @@
       navigator.serviceWorker.register('./sw.js');
     }
 
+    // home workout sessions — user selects one from the settings dialog
+    const WORKOUTS = [
+      {
+        name: 'Push',
+        exercises: [
+          { name: 'Pushups',                   workSeconds: 40, restSeconds: 20, rounds: 3 },
+          { name: 'Dumbbell shoulder press',   workSeconds: 40, restSeconds: 20, rounds: 3 },
+        ],
+      },
+      {
+        name: 'Hinge/Pull',
+        exercises: [
+          { name: 'Romanian deadlift',         workSeconds: 45, restSeconds: 15, rounds: 3 },
+          { name: 'Bent-over row (left arm)',  workSeconds: 45, restSeconds: 15, rounds: 3 },
+          { name: 'Bent-over row (right arm)', workSeconds: 45, restSeconds: 15, rounds: 3 },
+        ],
+      },
+      {
+        name: 'Legs/Core',
+        exercises: [
+          { name: 'Goblet squat',              workSeconds: 40, restSeconds: 20, rounds: 3 },
+          { name: 'Plank',                     workSeconds: 30, restSeconds: 10, rounds: 3 },
+        ],
+      },
+    ];
+
     const PRESETS = [
       { workSeconds: 20, restSeconds: 10, targetRounds: 8  },
       { workSeconds: 30, restSeconds: 15, targetRounds: 10 },
       { workSeconds: 45, restSeconds: 15, targetRounds: 8  },
     ];
-    const DEFAULT_SETTINGS = { ...PRESETS[1] };
-    let settings = { ...DEFAULT_SETTINGS };
+    const DEFAULT_SETTINGS = {
+      exercises: [{ name: 'Work', workSeconds: 30, restSeconds: 15, rounds: 10 }],
+    };
+    let settings = { exercises: [{ ...DEFAULT_SETTINGS.exercises[0] }] };
+
+    let currentWorkout = WORKOUTS[0];
 
     function loadSettings() {
       // restore persisted settings from localstorage on startup
@@ -276,7 +306,8 @@
       const saved = localStorage.getItem('fitSettings');
       if (!saved) { return; }
       try {
-        Object.assign(settings, JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        if (parsed.exercises) { Object.assign(settings, parsed); }
       } catch (e) {}
     }
 
@@ -286,10 +317,30 @@
       localStorage.setItem('fitSettings', JSON.stringify(settings));
     }
 
+    function loadSelection() {
+      // restore the last selected workout from localstorage
+
+      const saved = localStorage.getItem('fitSelectedWorkout');
+      if (!saved) { return; }
+      if (saved === 'manual') {
+        currentWorkout = settings;
+      } else {
+        const match = WORKOUTS.find(w => w.name === saved);
+        if (match) { currentWorkout = match; }
+      }
+    }
+
+    function currentExercise() {
+      // return the exercise currently active in the workout
+
+      return currentWorkout.exercises[exerciseIndex];
+    }
+
     function phaseDurations() {
       // return work/rest durations in seconds, shortened in dev mode
 
-      return DEV ? { work: 8, rest: 5 } : { work: settings.workSeconds, rest: settings.restSeconds };
+      const exercise = currentExercise();
+      return DEV ? { work: 8, rest: 5 } : { work: exercise.workSeconds, rest: exercise.restSeconds };
     }
 
     let timerState          = 'idle'; // 'idle' | 'countdown' | 'active' | 'paused' | 'done'
@@ -298,6 +349,7 @@
     let phaseElapsedMs      = 0;      // elapsed ms in the current workout phase
     let workoutMs           = 0;      // total elapsed ms across all workout phases
     let round               = 1;
+    let exerciseIndex       = 0;      // which exercise within currentWorkout is active
     let lastCountdownSecond = -1;     // guards countdown beeps against firing multiple times
     // there are two distinct "get ready" countdowns, both showing 3-2-1 with the same visuals and sounds:
     //
@@ -333,6 +385,10 @@
       ],
       workPulse: [
         { frequency: 220, duration: 0.12, delay: 0 },
+      ],
+      exerciseComplete: [
+        { frequency: 440, duration: 0.15, delay: 0   },
+        { frequency: 554, duration: 0.3,  delay: 0.2 },
       ],
       workoutComplete: [
         { frequency: 440, duration: 0.15, delay: 0   },
@@ -432,61 +488,11 @@
 
     // --- level 1: rendering ---
 
-    function buildProgressSegments() {
-      // rebuild the progress bar background gradient and fill to match current settings
-
-      const progressBar = document.getElementById('progressBar');
-      if (settings.targetRounds === 0) {
-        progressBar.style.display = 'none';
-        return;
-      }
-      progressBar.style.display = '';
-
-      const phases = phaseDurations();
-      const total  = settings.targetRounds * phases.work + (settings.targetRounds - 1) * phases.rest;
-      const dimStops    = [];
-      const brightStops = [];
-      let accumulated   = 0;
-
-      for (let i = 0; i < settings.targetRounds; i++) {
-        const workStart = (accumulated / total * 100).toFixed(4);
-        accumulated += phases.work;
-        const workEnd = (accumulated / total * 100).toFixed(4);
-        dimStops.push(`rgba(255,96,64,0.2) ${workStart}%`, `rgba(255,96,64,0.2) ${workEnd}%`);
-        brightStops.push(`#ff6040 ${workStart}%`, `#ff6040 ${workEnd}%`);
-
-        if (i < settings.targetRounds - 1) {
-          const restStart = (accumulated / total * 100).toFixed(4);
-          accumulated += phases.rest;
-          const restEnd = (accumulated / total * 100).toFixed(4);
-          dimStops.push(`rgba(64,152,224,0.2) ${restStart}%`, `rgba(64,152,224,0.2) ${restEnd}%`);
-          brightStops.push(`#4098e0 ${restStart}%`, `#4098e0 ${restEnd}%`);
-        }
-      }
-
-      progressBar.style.background = `linear-gradient(to right, ${dimStops.join(', ')})`;
-
-      const fill = document.createElement('div');
-      fill.id = 'progressFill';
-      fill.style.background = `linear-gradient(to right, ${brightStops.join(', ')})`;
-      progressBar.replaceChildren(fill);
-    }
-
-    function updateProgressBar() {
-      // advance the fill position to reflect total elapsed workout time
-
-      if (settings.targetRounds === 0) { return; }
-      const phases = phaseDurations();
-      const totalDurationMs = (settings.targetRounds * phases.work + (settings.targetRounds - 1) * phases.rest) * 1000;
-      const percentage = Math.min(workoutMs / totalDurationMs * 100, 100);
-      const fill = document.getElementById('progressFill');
-      if (fill) { fill.style.clipPath = `inset(0 ${(100 - percentage).toFixed(2)}% 0 0)`; }
-    }
-
     function render() {
       // update all dom elements to reflect current timer and workout state
 
       const phases    = phaseDurations();
+      const exercise  = currentExercise();
       const isRunning = timerState === 'active' || timerState === 'countdown';
 
       let phaseLabel, timerText, dataPhase;
@@ -505,14 +511,23 @@
         dataPhase  = 'rest';
       } else {
         const timeRemaining = phases[phase] - Math.floor(phaseElapsedMs / 1000);
-        phaseLabel = phase === 'work' ? 'Work' : 'Rest';
+        phaseLabel = phase === 'work' ? exercise.name : 'Rest';
         timerText  = formatTimer(Math.max(0, timeRemaining));
         dataPhase  = phase;
       }
 
-      const roundSuffix = settings.targetRounds > 0 ? ` / ${settings.targetRounds}` : '';
+      const roundSuffix = exercise.rounds > 0 ? ` / ${exercise.rounds}` : '';
+      let roundText;
+      if (timerState === 'idle' && currentWorkout.name) {
+        roundText = currentWorkout.name;
+      } else if (currentWorkout.exercises.length > 1) {
+        roundText = `Ex ${exerciseIndex + 1}/${currentWorkout.exercises.length} \u00b7 Round ${round}${roundSuffix}`;
+      } else {
+        roundText = `Round ${round}${roundSuffix}`;
+      }
+
       document.body.dataset.phase                          = dataPhase;
-      document.getElementById('round').textContent         = `Round ${round}${roundSuffix}`;
+      document.getElementById('round').textContent         = roundText;
       document.getElementById('totalTime').textContent     = formatTimer(Math.floor(workoutMs / 1000));
       document.getElementById('phase').textContent         = phaseLabel;
       document.getElementById('timer').textContent         = timerText;
@@ -521,7 +536,7 @@
     }
 
     function frame(timestamp) {
-      // requestanimationframe callback — drives clocks, event queue, and progress bar each frame
+      // requestanimationframe callback — drives clocks and event queue each frame
 
       rafId = requestAnimationFrame(frame);
       const delta = lastTimestamp === null ? 0 : timestamp - lastTimestamp;
@@ -542,7 +557,6 @@
         phaseElapsedMs += delta;
         workoutMs      += delta;
         drainEvents();
-        updateProgressBar();
       }
 
       render();
@@ -612,7 +626,7 @@
     }
 
     function enterIdle() {
-      // reset all workout state to the beginning
+      // reset per-exercise state — workoutMs is session-level and not touched here
 
       stopRaf();
       releaseWakeLock();
@@ -620,7 +634,6 @@
       timerState     = 'idle';
       phase          = 'work';
       phaseElapsedMs = 0;
-      workoutMs      = 0;
       round          = 1;
       workCountdown  = false;
     }
@@ -636,6 +649,26 @@
       playSound(SOUNDS.workoutComplete);
     }
 
+    function exitExercise() {
+      // advance to the next exercise in the session, or complete the session if this was the last one
+
+      if (exerciseIndex < currentWorkout.exercises.length - 1) {
+        exerciseIndex++;
+        enterIdle();
+        playSound(SOUNDS.exerciseComplete);
+        return;
+      }
+      enterDone();
+    }
+
+    function resetSession() {
+      // reset to exercise 1 of the current workout, clearing the session total
+
+      exerciseIndex = 0;
+      workoutMs     = 0;
+      enterIdle();
+    }
+
     function endPhase() {
       // transition to the next phase — called from the event queue when a phase timer expires
 
@@ -643,8 +676,8 @@
       const phases   = phaseDurations();
       phaseElapsedMs -= phases[phase] * 1000; // carry over overshoot to keep timing accurate
 
-      if (phase === 'work' && settings.targetRounds > 0 && round >= settings.targetRounds) {
-        enterDone();
+      if (phase === 'work' && currentExercise().rounds > 0 && round >= currentExercise().rounds) {
+        exitExercise();
         return;
       }
       if (phase === 'work') {
@@ -667,7 +700,11 @@
       if (!audioCtx) { audioCtx = new AudioContext(); }
       if (audioCtx.state === 'suspended') { audioCtx.resume(); }
 
-      if (timerState === 'done') { enterIdle(); }
+      if (timerState === 'done') {
+        resetSession();
+        render();
+        return;
+      }
 
       if (timerState === 'idle' || (timerState === 'paused' && phase === 'work')) {
         enterCountdown();
@@ -683,34 +720,66 @@
     function onReset() {
       // handle reset button — restore workout to initial state
 
-      enterIdle();
-      buildProgressSegments();
+      resetSession();
       render();
+    }
+
+    function updateSettingsFields() {
+      // show manual fields or session details depending on what is selected
+
+      const selectValue = document.getElementById('workoutSelect').value;
+      const isManual    = selectValue === 'manual';
+      document.getElementById('presets').style.display       = isManual ? '' : 'none';
+      document.getElementById('fields').style.display        = isManual ? '' : 'none';
+      const sessionDetails = document.getElementById('sessionDetails');
+      if (isManual) {
+        sessionDetails.style.display = 'none';
+      } else {
+        const workout = WORKOUTS[parseInt(selectValue, 10)];
+        sessionDetails.innerHTML = workout.exercises.map(ex =>
+          `<div>${ex.name}</div><div>${ex.workSeconds}/${ex.restSeconds} \u00d7${ex.rounds}</div>`
+        ).join('');
+        sessionDetails.style.display = 'grid';
+      }
     }
 
     function onOpenSettings() {
       // populate inputs with current settings and show the settings dialog
 
-      document.getElementById('workInput').value   = settings.workSeconds;
-      document.getElementById('restInput').value   = settings.restSeconds;
-      document.getElementById('roundsInput').value = settings.targetRounds;
+      const workoutIndex = WORKOUTS.indexOf(currentWorkout);
+      document.getElementById('workoutSelect').value = workoutIndex >= 0 ? String(workoutIndex) : 'manual';
+      updateSettingsFields();
+      const exercise = settings.exercises[0];
+      document.getElementById('workInput').value   = exercise.workSeconds;
+      document.getElementById('restInput').value   = exercise.restSeconds;
+      document.getElementById('roundsInput').value = exercise.rounds;
       document.getElementById('settingsDialog').showModal();
     }
 
     function onApplySettings() {
-      // read form inputs, clamp values, save, and reset the timer
+      // apply selected workout session or manual settings, then reset
 
-      const workValue   = parseInt(document.getElementById('workInput').value, 10);
-      const restValue   = parseInt(document.getElementById('restInput').value, 10);
-      const roundsValue = parseInt(document.getElementById('roundsInput').value, 10);
-      settings.workSeconds  = Math.max(5, isNaN(workValue)   ? DEFAULT_SETTINGS.workSeconds  : workValue);
-      settings.restSeconds  = Math.max(5, isNaN(restValue)   ? DEFAULT_SETTINGS.restSeconds  : restValue);
-      settings.targetRounds = Math.max(0, isNaN(roundsValue) ? DEFAULT_SETTINGS.targetRounds : roundsValue);
-      saveSettings();
-      enterIdle();
-      buildProgressSegments();
+      const selectValue = document.getElementById('workoutSelect').value;
+      if (selectValue !== 'manual') {
+        currentWorkout = WORKOUTS[parseInt(selectValue, 10)];
+      } else {
+        const workValue   = parseInt(document.getElementById('workInput').value, 10);
+        const restValue   = parseInt(document.getElementById('restInput').value, 10);
+        const roundsValue = parseInt(document.getElementById('roundsInput').value, 10);
+        const exercise    = settings.exercises[0];
+        const defaults    = DEFAULT_SETTINGS.exercises[0];
+        exercise.workSeconds = Math.max(5, isNaN(workValue)   ? defaults.workSeconds : workValue);
+        exercise.restSeconds = Math.max(5, isNaN(restValue)   ? defaults.restSeconds : restValue);
+        exercise.rounds      = Math.max(0, isNaN(roundsValue) ? defaults.rounds      : roundsValue);
+        saveSettings();
+        currentWorkout = settings;
+      }
+      localStorage.setItem('fitSelectedWorkout', currentWorkout === settings ? 'manual' : currentWorkout.name);
+      resetSession();
       render();
     }
+
+    document.getElementById('workoutSelect').addEventListener('change', updateSettingsFields);
 
     document.querySelectorAll('.presetBtn').forEach(button => {
       button.addEventListener('click', () => {
@@ -746,8 +815,12 @@
       }
     });
 
+    document.getElementById('workoutSelect').innerHTML =
+      WORKOUTS.map((w, i) => `<option value="${i}">${w.name}</option>`).join('') +
+      '<option value="manual">Manual</option>';
+
     loadSettings();
-    buildProgressSegments();
+    loadSelection();
     render();
   </script>
 </body>
